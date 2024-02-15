@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/base64"
+	"errors"
 	"github.com/Microsoft/go-winio/pkg/guid"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -51,6 +53,9 @@ func (s *service) getTokens(c *gin.Context) {
 		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
 	}
 
+	//////////////////////////////////пишем guid  в куки и отправляем токены json'ом
+	c.SetCookie("user", json.GUID, int(s.expirationTimeAccessToken), "/", strings.Split(s.addr, ":")[0], false, true)
+
 	//Отправляем пару
 	c.JSON(http.StatusOK, struct {
 		Access  string
@@ -76,11 +81,16 @@ func (s *service) createAndRememberPairTokens(guid string) (accessToken, refresh
 }
 
 func (s *service) handRefresh(c *gin.Context) {
+	guid, err := c.Cookie("user")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, struct{}{})
+	}
+
 	//читаем refresh токен из json
 	var json struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
 	}
-	err := c.ShouldBindJSON(&json)
+	err = c.ShouldBindJSON(&json)
 	if err != nil {
 		s.sendError(c, http.StatusBadRequest, "The refresh_token Field Was Not Found")
 		return
@@ -89,7 +99,11 @@ func (s *service) handRefresh(c *gin.Context) {
 	//проверяем есть ли такой refresh токен в БД
 	hash, err := s.storage.findHash(guid, json.RefreshToken)
 	if err != nil {
-		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
+		if errors.Is(err, ErrNotFound) {
+			s.sendError(c, http.StatusBadRequest, ErrNotFound.Error())
+		} else {
+			s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
+		}
 		return
 	}
 
@@ -157,7 +171,7 @@ func (s *service) newRefreshToken() string {
 // Отправить JSON с сообщением об ошибке
 func (s *service) sendError(c *gin.Context, code int, message string) {
 	c.JSON(code, struct {
-		Message string
+		Error string
 	}{message})
 }
 

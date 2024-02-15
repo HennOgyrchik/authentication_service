@@ -26,7 +26,6 @@ func dbConn() *connect {
 		return nil
 	}
 
-	//проверка подключения
 	err = client.Ping(ctx, nil)
 	if err != nil {
 		return nil

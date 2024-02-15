@@ -2,7 +2,6 @@ package main
 
 import "errors"
 
-var ErrAlreadyExists = errors.New("The token already exists")
-var ErrExpTimeHasExpired = errors.New("The expiration date has expired")
-var InternalServerError = errors.New("Internal Server Error")
-var ErrNotFound = errors.New("Not Found")
+var ErrExpTimeHasExpired = errors.New("the expiration date has expired")
+var InternalServerError = errors.New("internal server error")
+var ErrNotFound = errors.New("not found")

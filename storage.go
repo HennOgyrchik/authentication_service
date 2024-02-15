@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"golang.org/x/crypto/bcrypt"
 	"sync"
 )
@@ -48,30 +47,12 @@ func (s *storage) rememberTokens(guid string, access tokenInfo, refresh tokenInf
 	return nil
 }
 
-//// проверка Access токена на валидность
-//func (s *storage) checkExistsAndValidityAccessToken(guid string) (bool, error) {
-//	s.RLock()
-//	row, ok := s.accessMap[guid]
-//	s.RUnlock()
-//
-//	if ok {
-//		//если запись есть, то надо проверить актуальность!
-//		if row.expTime > time.Now().Unix() {
-//			return false, ErrAlreadyExists
-//		}
-//		//если запись есть и она протухла, то ...
-//		return false, ErrExpTimeHasExpired
-//	}
-//	return true, nil
-//}
-
 // Удаление токена в мапе и БД
 func (s *storage) deleteToken(guid string, hash string) error {
 	s.Lock()
 
 	delete(s.accessMap, guid)
 
-	//hash,err := s.findHash(guid, refreshToken)
 	err := s.dbCollection.deleteOne(hash)
 
 	s.Unlock()
@@ -91,7 +72,6 @@ func (s *storage) findHash(guid string, token string) (string, error) {
 			return row.Token, nil
 		}
 	}
-	fmt.Println("Не нашлись записи")
 	return "", ErrNotFound
 }
 
