@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"time"
 )
 
 type connect struct {
@@ -14,9 +12,10 @@ type connect struct {
 	ctx        context.Context
 }
 
-type info struct {
+type data struct {
 	Token   string
-	ExpTime string
+	ExpTime int64
+	Guid    string
 }
 
 func dbConn() *connect {
@@ -41,37 +40,44 @@ func dbConn() *connect {
 	return &connect{collection: collection, ctx: ctx}
 }
 
-func (c *connect) insertOne(token string, time time.Duration) (interface{}, error) {
-	rows, err := c.find(token)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(rows) != 0 {
-		return nil, errors.New(alreadyExists)
-	}
-
-	insResult, err := c.collection.InsertOne(c.ctx, bson.M{"token": token, "expTime": time.String()})
-	return insResult.InsertedID, err
+func (c *connect) insertOne(data data) error {
+	_, err := c.collection.InsertOne(c.ctx, bson.M{"token": data.Token, "expTime": data.ExpTime, "guid": data.Guid})
+	return err
 }
 
-func (c *connect) find(token string) ([]info, error) {
-	var results []info
+func (c *connect) find(guid string) ([]data, error) {
+	var result []data
 
-	cur, err := c.collection.Find(c.ctx, bson.M{"token": token})
+	cur, err := c.collection.Find(c.ctx, bson.M{"guid": guid})
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
 	for cur.Next(c.ctx) {
-		var element info
+		var element data
 		err = cur.Decode(&element)
 		if err != nil {
-			return nil, err
+			return result, err
 		}
-		results = append(results, element)
-
+		result = append(result, element)
 	}
 
-	return results, nil
+	return result, nil
+}
+
+func (c *connect) findOne(token string) (data, error) {
+	var result data
+	err := c.collection.FindOne(c.ctx, bson.M{"token": token}).Decode(&result)
+	return result, err
+
+}
+
+func (c *connect) deleteOne(hash string) error {
+	row, err := c.findOne(hash)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.collection.DeleteOne(c.ctx, bson.M{"token": row.Token})
+	return err
 }

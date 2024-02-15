@@ -1,11 +1,29 @@
 package main
 
-import "github.com/gin-gonic/gin"
+import (
+	"fmt"
+	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+)
 
 func main() {
-	service := newService()
-	//это надо будет убрать!
-	service.storage.dbCollection.collection.Drop(service.dbCollection.ctx)
+	///////////////////////////////////////////// читать из файла
+	address := "192.168.0.116:8080"
+	key := "very-secret-key"
+	aMinute := 1
+	rMinute := 3
+	bcryptCost := bcrypt.DefaultCost
+
+	/////////////////////////////////////////////////
+
+	service := newService(address, key, aMinute, rMinute, bcryptCost)
+
+	//очистка бд от записей
+	err := service.storage.dbCollection.collection.Drop(service.storage.dbCollection.ctx)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	router := gin.Default()
 

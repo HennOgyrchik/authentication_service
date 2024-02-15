@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"errors"
-	"fmt"
 	"github.com/Microsoft/go-winio/pkg/guid"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -13,21 +11,20 @@ import (
 )
 
 type service struct {
-	storage
+	storage                    storage
 	addr                       string
 	jwtSecretKey               []byte
-	expirationTimeAccessToken  time.Duration
-	expirationTimeRefreshToken time.Duration
+	expirationTimeAccessToken  int64
+	expirationTimeRefreshToken int64
 }
 
-func newService() *service {
+func newService(address string, key string, expTimeAccessTokenInMinute int, expTimeRefreshTokenInMinute int, bcryptCost int) *service {
 	return &service{
-		///////////////////////////////////////////// читать из файла
-		addr:                       "192.168.0.116:8080",
-		jwtSecretKey:               []byte("very-secret-key"),
-		expirationTimeAccessToken:  time.Duration(time.Hour * 12),
-		expirationTimeRefreshToken: time.Duration(time.Hour * 12),
-		storage:                    *newStorage(),
+		addr:                       address,
+		jwtSecretKey:               []byte(key),
+		expirationTimeAccessToken:  int64(time.Minute * time.Duration(expTimeAccessTokenInMinute)),
+		expirationTimeRefreshToken: int64(time.Minute * time.Duration(expTimeRefreshTokenInMinute)),
+		storage:                    *newStorage(bcryptCost),
 	}
 }
 
@@ -42,93 +39,93 @@ func (s *service) getTokens(c *gin.Context) {
 		return
 	}
 
-	//проверка полученного из json GUID(строка) на соответствие типу данных guid.GUID, попыткой преобразования типа string -> guid.GUID
-	tmp := []byte(json.GUID)
-	tmpGUID := guid.GUID{}
-	err = tmpGUID.UnmarshalText(tmp)
+	//проверка полученного из json GUID(строка)
+	_, err = convertToGUID(json.GUID)
 	if err != nil {
 		s.sendError(c, http.StatusBadRequest, "Invalid Data")
-		return
 	}
 
-	//Проверка прошла успешно, записываем GUID как строку.
-	userGUID := json.GUID
-
-	//ПРОВЕКА НА СУЩЕСТВОВАНИЕ!
-	if _, ok := s.storage.accessMap[userGUID]; ok {
-		s.sendError(c, http.StatusBadRequest, "Already Exists")
-		return
-	}
-	//создаем новые токены
-	accessToken, err := s.newAccessToken(userGUID)
+	//Создаем новую пару
+	access, refresh, err := s.createAndRememberPairTokens(json.GUID)
 	if err != nil {
-		s.sendError(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	refreshToken := s.newRefreshToken()
-
-	//запоминаем токены
-	err = s.storage.rememberTokens(userInfo{
-		guid:                userGUID,
-		accessToken:         accessToken,
-		expTimeAccessToken:  s.expirationTimeAccessToken,
-		refreshToken:        refreshToken,
-		expTimeRefreshToken: s.expirationTimeRefreshToken,
-	})
-	if err != nil {
-		if errors.Is(err, errors.New(alreadyExists)) {
-			s.sendError(c, http.StatusBadRequest, "Already Exists")
-		} else {
-			s.sendError(c, http.StatusInternalServerError, "Internal Server Error")
-		}
-		return
+		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
 	}
 
-	//пишем access токен в куки и отправляем токены json'ом
-	c.SetCookie("user_cookie", accessToken, int(s.expirationTimeAccessToken), "/", "192.168.0.116", false, true)
+	//Отправляем пару
 	c.JSON(http.StatusOK, struct {
-		Access_Token  string
-		Refresh_Token string
-	}{accessToken, refreshToken})
+		Access  string
+		Refresh string
+	}{access, refresh})
 
 }
 
+func (s *service) createAndRememberPairTokens(guid string) (accessToken, refreshToken string, err error) {
+
+	//создаем новые токены
+	accessToken, err = s.newAccessToken(guid)
+	if err != nil {
+		return
+	}
+	refreshToken = s.newRefreshToken()
+
+	//запоминаем токены
+	err = s.storage.rememberTokens(guid,
+		tokenInfo{token: accessToken, expTime: time.Now().Unix() + s.expirationTimeAccessToken},
+		tokenInfo{token: refreshToken, expTime: time.Now().Unix() + s.expirationTimeRefreshToken})
+	return
+}
+
 func (s *service) handRefresh(c *gin.Context) {
-	//читаем рефреш токен из json
+	//читаем refresh токен из json
 	var json struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
 	}
 	err := c.ShouldBindJSON(&json)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, struct{}{})
+		s.sendError(c, http.StatusBadRequest, "The refresh_token Field Was Not Found")
 		return
 	}
 
 	//проверяем есть ли такой refresh токен в БД
-	rows, err := s.dbCollection.find(json.RefreshToken)
-	if len(rows) != 0 {
-		c.JSON(http.StatusBadRequest, struct{}{})
+	hash, err := s.storage.findHash(guid, json.RefreshToken)
+	if err != nil {
+		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
 		return
 	}
+
+	row, err := s.storage.findOne(hash)
+
 	//проверяем действителен ли еще токен
-
-	//читаем куки
-	accessToken, err := c.Cookie("user_cookie")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, struct{}{})
+	if row.ExpTime <= time.Now().Unix() {
+		s.sendError(c, http.StatusBadRequest, ErrExpTimeHasExpired.Error())
+		return
 	}
-	fmt.Println("access token: ", accessToken)
 
-	// проверяем связку refresh - access
+	//удаляем старую пару
+	err = s.storage.deleteToken(row.Guid, hash)
+	if err != nil {
+		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
+	}
 
-	//выдаем новую пару
+	//Создаем новую пару
+	access, refresh, err := s.createAndRememberPairTokens(row.Guid)
+	if err != nil {
+		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
+	}
+
+	//Отправляем пару
+	c.JSON(http.StatusOK, struct {
+		Access  string
+		Refresh string
+	}{access, refresh})
 
 }
 
+// Сгенерировать новый Access Token
 func (s *service) newAccessToken(guid string) (t string, err error) {
 	payload := jwt.MapClaims{
 		"guid": guid,
-		"exp":  time.Now().Unix() + int64(s.expirationTimeAccessToken),
+		"exp":  time.Now().Unix() + s.expirationTimeAccessToken,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, payload)
@@ -138,6 +135,7 @@ func (s *service) newAccessToken(guid string) (t string, err error) {
 	return
 }
 
+// Сгенерировать новый Refresh Token
 func (s *service) newRefreshToken() string {
 	var charset = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/")
 	salt := time.Now().Format("200612345")
@@ -156,8 +154,17 @@ func (s *service) newRefreshToken() string {
 	return base64.StdEncoding.EncodeToString(randStr)
 }
 
+// Отправить JSON с сообщением об ошибке
 func (s *service) sendError(c *gin.Context, code int, message string) {
 	c.JSON(code, struct {
 		Message string
 	}{message})
+}
+
+// Проверка на соответствие типу данных guid.GUID попыткой преобразования типа string -> guid.GUID
+func convertToGUID(str string) (guid.GUID, error) {
+	tmp := []byte(str)
+	tmpGUID := guid.GUID{}
+	err := tmpGUID.UnmarshalText(tmp)
+	return tmpGUID, err
 }
