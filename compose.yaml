@@ -1,0 +1,23 @@
+version: "3"
+services:
+  mongodb:
+    image: "mongo:4.0.4"
+    environment:
+      MONGODB_INITDB_ROOT_USERNAME: sample-db-user
+      MONGODB_INITDB_ROOT_PASSWORD: sample-password
+    volumes:
+      - /data-vol:/data/db
+  medods-service:
+    image: "medods:0.0.1"
+    environment:
+      SECRET_KEY: "Hello world"
+      EXPIRATION_TIME_ACCESS_TOKEN: "5"
+      EXPIRATION_TIME_REFRESH_TOKEN: "10"
+      BCRYPT_COST: "14"
+      DATABASE_ADDRESS: "mongodb:27017"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongodb
+volumes:
+  mongodb:

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -18,32 +19,32 @@ type data struct {
 	Guid    string
 }
 
-func dbConn() *connect {
-
+// dbConn Создание подключения к БД
+func dbConn(addr string, port string) (*connect, error) {
 	ctx := context.Background()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://192.168.0.116:27017"))
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", addr, port)))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
+	//проверка соединения
 	err = client.Ping(ctx, nil)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	collection := client.Database("tokens").Collection("refresh")
-	if err != nil {
-		return nil
-	}
 
-	return &connect{collection: collection, ctx: ctx}
+	return &connect{collection: collection, ctx: ctx}, err
 }
 
+// insertOne Вставка одной записи в БД
 func (c *connect) insertOne(data data) error {
 	_, err := c.collection.InsertOne(c.ctx, bson.M{"token": data.Token, "expTime": data.ExpTime, "guid": data.Guid})
 	return err
 }
 
+// find поиск всех записей в БД по guid
 func (c *connect) find(guid string) ([]data, error) {
 	var result []data
 
@@ -64,6 +65,7 @@ func (c *connect) find(guid string) ([]data, error) {
 	return result, nil
 }
 
+// findOne поиск одной записи по токену
 func (c *connect) findOne(token string) (data, error) {
 	var result data
 	err := c.collection.FindOne(c.ctx, bson.M{"token": token}).Decode(&result)
@@ -71,6 +73,7 @@ func (c *connect) findOne(token string) (data, error) {
 
 }
 
+// deleteOne удаление одной записи из БД по хэшу
 func (c *connect) deleteOne(hash string) error {
 	row, err := c.findOne(hash)
 	if err != nil {

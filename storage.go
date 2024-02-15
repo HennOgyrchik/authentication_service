@@ -17,14 +17,20 @@ type tokenInfo struct {
 	expTime int64
 }
 
-func newStorage(bcryptCost int) *storage {
+// newStorage создание нового хранилища для Access токенов и подключения к БД для Refresh токена
+func newStorage(bcryptCost int, dbAddr string, dbPort string) (*storage, error) {
+	conn, err := dbConn(dbAddr, dbPort)
+	if err != nil {
+		return nil, err
+	}
 	return &storage{
 		bcryptCost:   bcryptCost,
 		accessMap:    make(map[string]tokenInfo),
-		dbCollection: dbConn(),
-	}
+		dbCollection: conn,
+	}, err
 }
 
+// rememberTokens запись Access токена в мапу, а Refresh в БД
 func (s *storage) rememberTokens(guid string, access tokenInfo, refresh tokenInfo) error {
 	s.Lock()
 	defer s.Unlock()
@@ -47,7 +53,7 @@ func (s *storage) rememberTokens(guid string, access tokenInfo, refresh tokenInf
 	return nil
 }
 
-// Удаление токена в мапе и БД
+// deleteToken удаление токенов в мапе и БД
 func (s *storage) deleteToken(guid string, hash string) error {
 	s.Lock()
 
@@ -57,10 +63,9 @@ func (s *storage) deleteToken(guid string, hash string) error {
 
 	s.Unlock()
 	return err
-
 }
 
-// найти хэш по guid
+// findHash поиск хэша токена по guid в БД
 func (s *storage) findHash(guid string, token string) (string, error) {
 	rows, err := s.dbCollection.find(guid)
 	if err != nil {
@@ -68,23 +73,21 @@ func (s *storage) findHash(guid string, token string) (string, error) {
 	}
 
 	for _, row := range rows {
-		if сheckPasswordHash(token, row.Token) {
+		if checkPasswordHash(token, row.Token) {
 			return row.Token, nil
 		}
 	}
 	return "", ErrNotFound
 }
 
-func (s *storage) findOne(hash string) (data, error) {
-	return s.dbCollection.findOne(hash)
-}
-
+// hashPassword хэширование строки
 func hashPassword(password string, cost int) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	return string(bytes), err
 }
 
-func сheckPasswordHash(password, hash string) bool {
+// checkPasswordHash проверка хэша на соответствие предполагаемой строке
+func checkPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
 }

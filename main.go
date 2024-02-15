@@ -3,32 +3,38 @@ package main
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
-	///////////////////////////////////////////// читать из файла
-	address := "192.168.0.116:8080"
-	key := "very-secret-key"
-	aMinute := 1
-	rMinute := 3
-	bcryptCost := bcrypt.DefaultCost
+	// чтение конфига
+	conf, err := newConfig()
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
-	/////////////////////////////////////////////////
-
-	service := newService(address, key, aMinute, rMinute, bcryptCost)
+	//создание сервиса по конфигу
+	service, err := newService(conf)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	//очистка бд от записей
-	err := service.storage.dbCollection.collection.Drop(service.storage.dbCollection.ctx)
+	err = service.storage.dbCollection.collection.Drop(service.storage.dbCollection.ctx)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println(err.Error())
 		return
 	}
 
 	router := gin.Default()
 
 	router.GET("/getTokens", service.getTokens)
-	router.GET("/refresh", service.handRefresh)
+	router.GET("/refreshToken", service.handRefresh)
 
-	router.Run(service.addr)
+	err = router.Run(service.addr)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 }

@@ -13,23 +13,32 @@ import (
 )
 
 type service struct {
-	storage                    storage
+	storage                    *storage
 	addr                       string
 	jwtSecretKey               []byte
 	expirationTimeAccessToken  int64
 	expirationTimeRefreshToken int64
 }
 
-func newService(address string, key string, expTimeAccessTokenInMinute int, expTimeRefreshTokenInMinute int, bcryptCost int) *service {
-	return &service{
-		addr:                       address,
-		jwtSecretKey:               []byte(key),
-		expirationTimeAccessToken:  int64(time.Minute * time.Duration(expTimeAccessTokenInMinute)),
-		expirationTimeRefreshToken: int64(time.Minute * time.Duration(expTimeRefreshTokenInMinute)),
-		storage:                    *newStorage(bcryptCost),
+// newService Создание нового сервиса, заполнение полей
+func newService(config config) (*service, error) {
+	addr := strings.Split(config.dbAddr, ":")
+
+	store, err := newStorage(config.bcryptCost, addr[0], addr[1])
+	if err != nil {
+		return nil, err
 	}
+
+	return &service{
+		addr:                       config.serviceAddr,
+		jwtSecretKey:               []byte(config.secretKey),
+		expirationTimeAccessToken:  int64(time.Minute * time.Duration(config.expTimeAccessToken)),
+		expirationTimeRefreshToken: int64(time.Minute * time.Duration(config.expTimeRefreshToken)),
+		storage:                    store,
+	}, err
 }
 
+// getTokens обработчик "/getTokens"
 func (s *service) getTokens(c *gin.Context) {
 	//читаем guid
 	var json struct {
@@ -42,7 +51,7 @@ func (s *service) getTokens(c *gin.Context) {
 	}
 
 	//проверка полученного из json GUID(строка)
-	_, err = convertToGUID(json.GUID)
+	_, err = stringToGUID(json.GUID)
 	if err != nil {
 		s.sendError(c, http.StatusBadRequest, "Invalid Data")
 	}
@@ -53,10 +62,10 @@ func (s *service) getTokens(c *gin.Context) {
 		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
 	}
 
-	//////////////////////////////////пишем guid  в куки и отправляем токены json'ом
-	c.SetCookie("user", json.GUID, int(s.expirationTimeAccessToken), "/", strings.Split(s.addr, ":")[0], false, true)
+	//пишем guid  в куки
+	c.SetCookie("user", json.GUID, int(s.expirationTimeRefreshToken), "/", strings.Split(s.addr, ":")[0], false, true)
 
-	//Отправляем пару
+	//Отправляем пару json'ом
 	c.JSON(http.StatusOK, struct {
 		Access  string
 		Refresh string
@@ -64,26 +73,28 @@ func (s *service) getTokens(c *gin.Context) {
 
 }
 
+// createAndRememberPairTokens создание пары Access-Refresh, запись в БД и accessMap
 func (s *service) createAndRememberPairTokens(guid string) (accessToken, refreshToken string, err error) {
 
-	//создаем новые токены
+	// создаем новые токены
 	accessToken, err = s.newAccessToken(guid)
 	if err != nil {
 		return
 	}
 	refreshToken = s.newRefreshToken()
 
-	//запоминаем токены
+	// запоминаем токены
 	err = s.storage.rememberTokens(guid,
 		tokenInfo{token: accessToken, expTime: time.Now().Unix() + s.expirationTimeAccessToken},
 		tokenInfo{token: refreshToken, expTime: time.Now().Unix() + s.expirationTimeRefreshToken})
 	return
 }
 
+// handRefresh обработчик "/refreshToken"
 func (s *service) handRefresh(c *gin.Context) {
-	guid, err := c.Cookie("user")
+	uGuid, err := c.Cookie("user")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, struct{}{})
+		s.sendError(c, http.StatusBadRequest, "bad request")
 	}
 
 	//читаем refresh токен из json
@@ -97,7 +108,7 @@ func (s *service) handRefresh(c *gin.Context) {
 	}
 
 	//проверяем есть ли такой refresh токен в БД
-	hash, err := s.storage.findHash(guid, json.RefreshToken)
+	hash, err := s.storage.findHash(uGuid, json.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			s.sendError(c, http.StatusBadRequest, ErrNotFound.Error())
@@ -107,7 +118,10 @@ func (s *service) handRefresh(c *gin.Context) {
 		return
 	}
 
-	row, err := s.storage.findOne(hash)
+	row, err := s.storage.dbCollection.findOne(hash)
+	if err != nil {
+		s.sendError(c, http.StatusInternalServerError, InternalServerError.Error())
+	}
 
 	//проверяем действителен ли еще токен
 	if row.ExpTime <= time.Now().Unix() {
@@ -135,7 +149,7 @@ func (s *service) handRefresh(c *gin.Context) {
 
 }
 
-// Сгенерировать новый Access Token
+// newAccessToken генерация нового Access Token
 func (s *service) newAccessToken(guid string) (t string, err error) {
 	payload := jwt.MapClaims{
 		"guid": guid,
@@ -144,15 +158,13 @@ func (s *service) newAccessToken(guid string) (t string, err error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, payload)
 
-	t, err = token.SignedString(s.jwtSecretKey)
-
-	return
+	return token.SignedString(s.jwtSecretKey)
 }
 
-// Сгенерировать новый Refresh Token
+// newRefreshToken генерация нового Refresh Token
 func (s *service) newRefreshToken() string {
-	var charset = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/")
-	salt := time.Now().Format("200612345")
+	var charset = []byte(base64Alphabet)
+	salt := time.Now().Format(timeLayout)
 	n := rand.Intn(50)
 	randStr := make([]byte, n, n+len(salt))
 
@@ -161,22 +173,21 @@ func (s *service) newRefreshToken() string {
 	}
 
 	randStr = append(randStr, salt[:]...)
-
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(randStr), func(i, j int) { randStr[i], randStr[j] = randStr[j], randStr[i] })
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r.Shuffle(len(randStr), func(i, j int) { randStr[i], randStr[j] = randStr[j], randStr[i] })
 
 	return base64.StdEncoding.EncodeToString(randStr)
 }
 
-// Отправить JSON с сообщением об ошибке
+// sendError отправка JSON с сообщением об ошибке
 func (s *service) sendError(c *gin.Context, code int, message string) {
 	c.JSON(code, struct {
 		Error string
 	}{message})
 }
 
-// Проверка на соответствие типу данных guid.GUID попыткой преобразования типа string -> guid.GUID
-func convertToGUID(str string) (guid.GUID, error) {
+// convertToGUID Проверка на соответствие типу данных guid.GUID попыткой преобразования string -> guid.GUID
+func stringToGUID(str string) (guid.GUID, error) {
 	tmp := []byte(str)
 	tmpGUID := guid.GUID{}
 	err := tmpGUID.UnmarshalText(tmp)
