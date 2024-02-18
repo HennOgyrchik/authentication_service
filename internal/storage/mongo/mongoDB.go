@@ -1,4 +1,4 @@
-package main
+package mongo
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type connect struct {
+type Connect struct {
 	collection *mongo.Collection
 	ctx        context.Context
 }
@@ -19,8 +19,8 @@ type data struct {
 	Guid    string
 }
 
-// dbConn Создание подключения к БД
-func dbConn(addr string, port string) (*connect, error) {
+// DBConn Создание подключения к БД
+func DBConn(addr string, port string) (*Connect, error) {
 	ctx := context.Background()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", addr, port)))
 	if err != nil {
@@ -35,17 +35,17 @@ func dbConn(addr string, port string) (*connect, error) {
 
 	collection := client.Database("tokens").Collection("refresh")
 
-	return &connect{collection: collection, ctx: ctx}, err
+	return &Connect{collection: collection, ctx: ctx}, err
 }
 
-// insertOne Вставка одной записи в БД
-func (c *connect) insertOne(data data) error {
-	_, err := c.collection.InsertOne(c.ctx, bson.M{"token": data.Token, "expTime": data.ExpTime, "guid": data.Guid})
+// InsertOne Вставка одной записи в БД
+func (c *Connect) InsertOne(guid string, token string, expTime int64) error {
+	_, err := c.collection.InsertOne(c.ctx, bson.M{"token": token, "expTime": expTime, "guid": guid})
 	return err
 }
 
-// find поиск всех записей в БД по guid
-func (c *connect) find(guid string) ([]data, error) {
+// Find поиск всех записей в БД по guid
+func (c *Connect) Find(guid string) ([]data, error) {
 	var result []data
 
 	cur, err := c.collection.Find(c.ctx, bson.M{"guid": guid})
@@ -65,21 +65,26 @@ func (c *connect) find(guid string) ([]data, error) {
 	return result, nil
 }
 
-// findOne поиск одной записи по токену
-func (c *connect) findOne(token string) (data, error) {
+// FindOne поиск одной записи по токену
+func (c *Connect) FindOne(token string) (data, error) {
 	var result data
 	err := c.collection.FindOne(c.ctx, bson.M{"token": token}).Decode(&result)
 	return result, err
 
 }
 
-// deleteOne удаление одной записи из БД по хэшу
-func (c *connect) deleteOne(hash string) error {
-	row, err := c.findOne(hash)
+// DeleteOne удаление одной записи из БД по хэшу
+func (c *Connect) DeleteOne(hash string) error {
+	row, err := c.FindOne(hash)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.collection.DeleteOne(c.ctx, bson.M{"token": row.Token})
 	return err
+}
+
+// Drop очистка БД
+func (c *Connect) Drop() error {
+	return c.collection.Drop(c.ctx)
 }

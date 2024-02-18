@@ -1,11 +1,11 @@
-package main
+package config
 
 import (
 	"os"
 	"strconv"
 )
 
-type config struct {
+type Config struct {
 	serviceAddr         string
 	secretKey           string
 	expTimeAccessToken  int
@@ -14,7 +14,7 @@ type config struct {
 	dbAddr              string
 }
 
-func newConfig() (config, error) {
+func NewConfig() (*Config, error) {
 	serviceAddr, exists := os.LookupEnv("SERVICE_ADDRESS")
 	if !exists {
 		serviceAddr = ":8080"
@@ -33,7 +33,7 @@ func newConfig() (config, error) {
 	} else {
 		expTimeAccessToken, err = strconv.Atoi(aTime)
 		if err != nil {
-			return config{}, err
+			return &Config{}, err
 		}
 	}
 
@@ -44,7 +44,7 @@ func newConfig() (config, error) {
 	} else {
 		expTimeRefreshToken, err = strconv.Atoi(rTime)
 		if err != nil {
-			return config{}, err
+			return &Config{}, err
 		}
 	}
 
@@ -55,16 +55,16 @@ func newConfig() (config, error) {
 	} else {
 		bcryptCost, err = strconv.Atoi(cost)
 		if err != nil {
-			return config{}, err
+			return &Config{}, err
 		}
 	}
 
 	dbAddr, exists := os.LookupEnv("DATABASE_ADDRESS")
 	if !exists {
-		return config{}, ErrAdrrDBNotFound
+		return &Config{}, ErrAdrressDBNotFound
 	}
 
-	return config{
+	return &Config{
 		serviceAddr:         serviceAddr,
 		secretKey:           secretKey,
 		expTimeAccessToken:  expTimeAccessToken,
@@ -73,4 +73,28 @@ func newConfig() (config, error) {
 		dbAddr:              dbAddr,
 	}, nil
 
+}
+
+func (c *Config) GetServiceAddress() string {
+	return c.serviceAddr
+}
+
+func (c *Config) GetDBAddress() string {
+	return c.dbAddr
+}
+
+func (c *Config) GetBcryptCost() int {
+	return c.bcryptCost
+}
+
+func (c *Config) GetSecretKey() string {
+	return c.secretKey
+}
+
+func (c *Config) GetExpTimeAccessToken() int {
+	return c.expTimeAccessToken
+}
+
+func (c *Config) GetExpTimeRefreshToken() int {
+	return c.expTimeRefreshToken
 }

@@ -3,25 +3,27 @@ package main
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"medods/internal/api"
+	"medods/internal/config"
 )
 
 func main() {
 	// чтение конфига
-	conf, err := newConfig()
+	conf, err := config.NewConfig()
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 
 	//создание сервиса по конфигу
-	service, err := newService(conf)
+	service, err := api.NewService(conf)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 
 	//очистка бд от записей
-	err = service.storage.dbCollection.collection.Drop(service.storage.dbCollection.ctx)
+	err = service.ClearStorage()
 	if err != nil {
 		fmt.Println(err.Error())
 		return
@@ -29,10 +31,10 @@ func main() {
 
 	router := gin.Default()
 
-	router.GET("/getTokens", service.getTokens)
-	router.GET("/refreshToken", service.handRefresh)
+	router.GET("/getTokens", service.GetTokens)
+	router.GET("/refreshTokens", service.RefreshTokens)
 
-	err = router.Run(service.addr)
+	err = router.Run(conf.GetServiceAddress())
 	if err != nil {
 		fmt.Println(err.Error())
 		return

@@ -13,7 +13,7 @@ services:
       SECRET_KEY: "Hello world"
       EXPIRATION_TIME_ACCESS_TOKEN: "5"
       EXPIRATION_TIME_REFRESH_TOKEN: "10"
-      BCRYPT_COST: "14"
+      BCRYPT_COST: "5"
       DATABASE_ADDRESS: "mongodb:27017"
     ports:
       - "8080:8080"
