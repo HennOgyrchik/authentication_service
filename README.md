@@ -44,9 +44,13 @@
 
 `
 curl -v --location --request GET 'http://192.168.0.116:8080/getTokens' \
+
 --header 'Content-Type: application/json' \
+
 --data '{
+
 "GUID": "b1d4ce5d-1612-3533-999c-cfa72ba94f86"
+
 }'
 `
 
@@ -54,9 +58,14 @@ curl -v --location --request GET 'http://192.168.0.116:8080/getTokens' \
 
 `
 curl  --location --request GET 'http://192.168.0.116:8080/refreshTokens' \
+
 --header 'Content-Type: application/json' \
+
 --header 'Cookie: user=b1d4ce5d-1612-3533-999c-cfa72ba94f86' \
+
 --data '{
+
 "refresh_token": "MjE4STQ5WUY2MlhjNDBDMjUxMGQ5"
+
 }'
 `
